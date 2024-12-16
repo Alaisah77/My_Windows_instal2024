@@ -27,3 +27,8 @@ variable "application_port" {
   description = "The port where the application is exposed"
   default     = 8883
 }
+
+variable "endpoint" {
+  description = "This is for the endpoint for the SNS topic"
+  default = ""
+}

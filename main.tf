@@ -69,6 +69,7 @@ resource "aws_instance" "windows_instance" {
   key_name                    = aws_key_pair.key_pair.key_name
   vpc_security_group_ids      = [aws_security_group.instance_sg.id]
   associate_public_ip_address = true
+  monitoring = true
 
   user_data = <<-EOF
               <powershell>
@@ -90,3 +91,32 @@ resource "aws_instance" "windows_instance" {
   }
 }
 
+resource "aws_cloudwatch_metric_alarm" "cpu_alarm" {
+  alarm_name          = "HighCPUUtilization"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = 600
+  statistic           = "Average"
+  threshold           = 80
+  alarm_description   = "This alarm triggers if CPU utilization exceeds 80% for 5 minutes"
+  dimensions = {
+    InstanceId = aws_instance.windows_instance.id
+  }
+  actions_enabled = true
+
+  alarm_actions = [
+    "arn:aws:sns:us-east-1:123456789012:my-sns-topic"  # Add SNS topic for notification
+  ]
+}
+
+resource "aws_sns_topic" "alarm_topic" {
+  name = "windows_gatherer"
+}
+
+resource "aws_sns_topic_subscription" "my_email" {
+  topic_arn = aws_sns_topic.alarm_topic.arn
+  protocol  = "email"
+  endpoint  = "var.endpoint"
+}
