@@ -30,5 +30,5 @@ variable "application_port" {
 
 variable "endpoint" {
   description = "This is for the endpoint for the SNS topic"
-  default = ""
+  default     = ""
 }

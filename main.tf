@@ -21,8 +21,26 @@ resource "aws_security_group" "instance_sg" {
     from_port   = 3389
     to_port     = 3389
     protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"] 
+    cidr_blocks = ["0.0.0.0/0"]
   }
+
+  ingress {
+    description = "Allow ALB to connect the instance"
+    from_port   = 8883
+    to_port     = 8883
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+
+  ingress {
+    description = "Allow ALB to connect the instance"
+    from_port   = 8880
+    to_port     = 8880
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
 
   ingress {
     description = "Allow HTTPS"
@@ -43,7 +61,7 @@ resource "aws_security_group" "instance_sg" {
 # Fetch the latest Windows Server AMI
 data "aws_ami" "windows" {
   most_recent = true
-  owners      = ["801119661308"] 
+  owners      = ["801119661308"]
 
   filter {
     name   = "name"
@@ -69,22 +87,51 @@ resource "aws_instance" "windows_instance" {
   key_name                    = aws_key_pair.key_pair.key_name
   vpc_security_group_ids      = [aws_security_group.instance_sg.id]
   associate_public_ip_address = true
-  monitoring = true
+  monitoring                  = true
 
   user_data = <<-EOF
-              <powershell>
-              # Install IIS
-              Install-WindowsFeature -name Web-Server
+              
+            <powershell>
+      
+            Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine -Force
 
-              # Download and Install ModelizeIT Gatherer
-              Import-Module BitsTransfer
-              Start-BitsTransfer -Source "https://${var.s3_bucket_name}/ModelizeIT/ModelizeIT-Gatherer.zip" -Destination "C:\\inetpub\\wwwroot\\ModelizeIT-Gatherer.zip"
-              Expand-Archive -Path "C:\\inetpub\\wwwroot\\ModelizeIT-Gatherer.zip" -DestinationPath "C:\\inetpub\\wwwroot\\ModelizeIT-Gatherer"
+            $DEST_DIR = "C:\\modelizeIT"
 
-              # Restart IIS
-              Restart-WebAppPool -Name "DefaultAppPool"
-              </powershell>
-              EOF
+            if (-Not (Test-Path -Path $DEST_DIR)) {
+                New-Item -Path $DEST_DIR -ItemType Directory
+            }
+
+            Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+
+            choco install 7zip -y
+
+            $InstallerPath = "$env:TEMP\\AWSCLIV2.msi"
+            Invoke-WebRequest -Uri "https://awscli.amazonaws.com/AWSCLIV2.msi" -OutFile $InstallerPath
+            Start-Process msiexec.exe -ArgumentList "/i $InstallerPath /quiet" -Wait
+            Remove-Item -Path $InstallerPath
+
+            $TempFilePath = "$env:TEMP\\modelizeIT-AnalysisServer.zip"
+            aws s3 cp "s3://saas-sandbox-staging/ModelizeIT/modelizeIT-AnalysisServer.zip" $TempFilePath
+
+            & "C:\\Program Files\\7-Zip\\7z.exe" x $TempFilePath -o$DEST_DIR
+
+            Remove-Item -Path $TempFilePath
+
+            Set-Location -Path "$DEST_DIR\\bin"
+
+            .\\RejuvenApptor-start.ps1
+            .\\modelizeIT-start.ps1
+            .\\Gatherer-JobRunner.ps1
+            .\\Gatherer-UI.ps1
+
+            Set-ItemProperty -Path 'HKLM:\\System\\CurrentControlSet\\Control\\Terminal Server' -Name 'fDenyTSConnections' -Value 0
+
+            Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+
+            $password = ConvertTo-SecureString "YourSecurePassword" -AsPlainText -Force
+            Set-LocalUser -Name "Administrator" -Password $password
+            </powershell>
+          EOF
 
   tags = {
     Name = "ModelizeIT_Gatherer"
@@ -107,7 +154,7 @@ resource "aws_cloudwatch_metric_alarm" "cpu_alarm" {
   actions_enabled = true
 
   alarm_actions = [
-    "arn:aws:sns:us-east-1:123456789012:my-sns-topic"  # Add SNS topic for notification
+    "arn:aws:sns:us-east-1:123456789012:my-sns-topic" # Add SNS topic for notification
   ]
 }
 
